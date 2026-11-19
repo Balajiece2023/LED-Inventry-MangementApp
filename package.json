@@ -1,0 +1,28 @@
+{
+  "name": "led-manufacturing-management-system",
+  "version": "1.0.0",
+  "description": "Modern Enterprise-Grade LED Light Manufacturing & Assembly Management System",
+  "scripts": {
+    "server": "cd backend && npm run dev",
+    "client": "cd frontend && npm run dev",
+    "build": "cd backend && npm run build && cd ../frontend && npm run build",
+    "seed": "cd backend && npm run prisma:seed",
+    "db:push": "cd backend && npm run prisma:push",
+    "start": "cd backend && npm start"
+  },
+  "keywords": [
+    "led-manufacturing",
+    "mes",
+    "erp",
+    "assembly-tracking",
+    "bom",
+    "qc-testing",
+    "inventory-reservation",
+    "postgresql",
+    "prisma",
+    "react",
+    "typescript"
+  ],
+  "author": "Leo Force",
+  "license": "MIT"
+}

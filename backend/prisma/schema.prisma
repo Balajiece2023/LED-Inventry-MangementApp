@@ -1,0 +1,329 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  STORE_KEEPER
+  PRODUCTION_SUPERVISOR
+  QC_ENGINEER
+  DISPATCH_TEAM
+}
+
+enum ProductStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum OrderStatus {
+  DRAFT
+  LOCKED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum AssemblyStage {
+  MATERIAL_ISSUED
+  ASSEMBLY_STARTED
+  ASSEMBLY_COMPLETED
+  TESTING
+  PACKING
+  FINISHED
+}
+
+enum TransactionType {
+  INWARD
+  RESERVED
+  UNRESERVED
+  ISSUED
+  CONSUMED
+  ADJUSTMENT
+}
+
+enum QCResult {
+  PASS
+  FAIL
+}
+
+enum FailureReason {
+  NONE
+  DRIVER_FAILURE
+  PCB_FAULT
+  LED_FAULT
+  ASSEMBLY_DEFECT
+  OTHER
+}
+
+enum DispatchStatus {
+  PENDING
+  DISPATCHED
+  CANCELLED
+}
+
+enum NotificationType {
+  LOW_STOCK
+  MATERIAL_SHORTAGE
+  PRODUCTION_DELAY
+  QC_FAILURE
+  PENDING_DISPATCH
+  INFO
+}
+
+model User {
+  id                    String                 @id @default(uuid())
+  email                 String                 @unique
+  password              String
+  name                  String
+  role                  Role                   @default(STORE_KEEPER)
+  phone                 String?
+  isActive              Boolean                @default(true)
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+
+  productionOrders      ProductionOrder[]      @relation("UserProductionOrders")
+  inventoryTransactions InventoryTransaction[] @relation("UserInventoryTransactions")
+  qcReports             QCReport[]             @relation("UserQCReports")
+  dispatchOrders        DispatchOrder[]        @relation("UserDispatchOrders")
+  auditLogs             AuditLog[]             @relation("UserAuditLogs")
+
+  @@map("users")
+}
+
+model Product {
+  id               String            @id @default(uuid())
+  modelNumber      String            @unique
+  productName      String
+  wattage          Float             // e.g. 12, 9, 18, 50
+  description      String?
+  status           ProductStatus     @default(ACTIVE)
+  imageUrl         String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  boms             BOM[]
+  productionOrders ProductionOrder[]
+  finishedGoods    FinishedGoods[]
+  dispatchOrders   DispatchOrder[]
+  qcCertificates   QCCertificate[]
+
+  @@map("products")
+}
+
+model Material {
+  id                    String                    @id @default(uuid())
+  materialCode          String                    @unique
+  materialName          String
+  category              String                    // e.g. "Chips", "Drivers", "Optics", "Mechanics", "Passive"
+  currentStock          Float                     @default(0) // Total physical inventory on hand
+  reservedStock         Float                     @default(0) // Locked for planned production
+  unit                  String                    // e.g. "PCS", "METERS", "KG"
+  unitCost              Float                     @default(0)
+  reorderLevel          Float                     @default(100)
+  supplier              String?
+  createdAt             DateTime                  @default(now())
+  updatedAt             DateTime                  @updatedAt
+
+  bomItems              BOMItem[]
+  productionMaterials   ProductionOrderMaterial[]
+  inventoryTransactions InventoryTransaction[]
+
+  @@map("materials")
+}
+
+model BOM {
+  id          String         @id @default(uuid())
+  productId   String
+  version     String         @default("1.0")
+  status      String         @default("ACTIVE") // ACTIVE, DRAFT, ARCHIVED
+  notes       String?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  product     Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  items       BOMItem[]
+
+  @@unique([productId, version])
+  @@map("bom")
+}
+
+model BOMItem {
+  id               String   @id @default(uuid())
+  bomId            String
+  materialId       String
+  quantityRequired Float    // quantity per 1 unit of product
+
+  bom              BOM      @relation(fields: [bomId], references: [id], onDelete: Cascade)
+  material         Material @relation(fields: [materialId], references: [id], onDelete: Restrict)
+
+  @@map("bom_items")
+}
+
+model ProductionOrder {
+  id                   String                    @id @default(uuid())
+  orderNumber          String                    @unique // e.g. PO-2026-0001
+  productId            String
+  quantity             Int
+  productionDate       DateTime                  @default(now())
+  status               OrderStatus               @default(DRAFT)
+  stage                AssemblyStage             @default(MATERIAL_ISSUED)
+  stageNotes           String?
+  createdById          String?
+  createdAt            DateTime                  @default(now())
+  updatedAt            DateTime                  @updatedAt
+
+  product              Product                   @relation(fields: [productId], references: [id], onDelete: Restrict)
+  createdBy            User?                     @relation("UserProductionOrders", fields: [createdById], references: [id])
+  requiredMaterials    ProductionOrderMaterial[]
+  qcReports            QCReport[]
+
+  @@map("production_orders")
+}
+
+model ProductionOrderMaterial {
+  id                String          @id @default(uuid())
+  productionOrderId String
+  materialId        String
+  requiredQuantity  Float
+  reservedQuantity  Float           @default(0)
+  issuedQuantity    Float           @default(0)
+
+  productionOrder   ProductionOrder @relation(fields: [productionOrderId], references: [id], onDelete: Cascade)
+  material          Material        @relation(fields: [materialId], references: [id], onDelete: Restrict)
+
+  @@map("production_order_materials")
+}
+
+model InventoryTransaction {
+  id              String          @id @default(uuid())
+  materialId      String
+  transactionType TransactionType
+  quantity        Float
+  previousStock   Float
+  newStock        Float
+  referenceType   String?         // PRODUCTION_ORDER, MANUAL_INWARD, QC_SCRAP, DISPATCH
+  referenceId     String?
+  notes           String?
+  createdById     String?
+  createdAt       DateTime        @default(now())
+
+  material        Material        @relation(fields: [materialId], references: [id], onDelete: Restrict)
+  createdBy       User?           @relation("UserInventoryTransactions", fields: [createdById], references: [id])
+
+  @@map("inventory_transactions")
+}
+
+model QCReport {
+  id                  String          @id @default(uuid())
+  reportNumber        String          @unique // e.g. QCR-2026-0001
+  productionOrderId   String
+  batchNumber         String
+  voltage             Float           // Measured Volts (e.g. 230.5 V)
+  current             Float           // Measured Amperes/mA (e.g. 0.052 A)
+  power               Float           // Measured Watts (e.g. 11.9 W)
+  temperature         Float           // Measured C (e.g. 48.2 C)
+  burnInTestDuration  String          // e.g. "4 Hours continuous"
+  remarks             String?
+  result              QCResult        @default(PASS)
+  failureReason       FailureReason   @default(NONE)
+  inspectedById       String?
+  inspectorName       String
+  images              String?         // JSON array of image URLs or base64/filenames
+  pdfReportUrl        String?
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+
+  productionOrder     ProductionOrder @relation(fields: [productionOrderId], references: [id], onDelete: Restrict)
+  inspectedBy         User?           @relation("UserQCReports", fields: [inspectedById], references: [id])
+  certificate         QCCertificate?
+
+  @@map("qc_reports")
+}
+
+model QCCertificate {
+  id                String    @id @default(uuid())
+  certificateNumber String    @unique // e.g. QCC-2026-001
+  qcReportId        String    @unique
+  batchNumber       String
+  productId         String
+  inspectionDate    DateTime  @default(now())
+  inspectorName     String
+  result            QCResult  @default(PASS)
+  certificatePdfUrl String?
+  createdAt         DateTime  @default(now())
+
+  qcReport          QCReport  @relation(fields: [qcReportId], references: [id], onDelete: Cascade)
+  product           Product   @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@map("qc_certificates")
+}
+
+model FinishedGoods {
+  id                String    @id @default(uuid())
+  batchNumber       String    @unique
+  productId         String
+  quantity          Int       // Available finished goods in store
+  reservedQuantity  Int       @default(0) // Locked for customer orders
+  manufacturingDate DateTime  @default(now())
+  qcStatus          QCResult  @default(PASS)
+  notes             String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  product           Product   @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@map("finished_goods")
+}
+
+model DispatchOrder {
+  id                  String         @id @default(uuid())
+  dispatchOrderNumber String         @unique // e.g. DSP-2026-0001
+  customerName        String
+  invoiceNumber       String         @unique // e.g. INV-2026-8801
+  productId           String
+  quantity            Int
+  dispatchDate        DateTime       @default(now())
+  status              DispatchStatus @default(PENDING)
+  dispatchNotePdfUrl  String?
+  createdById         String?
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+
+  product             Product        @relation(fields: [productId], references: [id], onDelete: Restrict)
+  createdBy           User?          @relation("UserDispatchOrders", fields: [createdById], references: [id])
+
+  @@map("dispatch_orders")
+}
+
+model Notification {
+  id         String           @id @default(uuid())
+  title      String
+  message    String
+  type       NotificationType @default(INFO)
+  isRead     Boolean          @default(false)
+  targetRole Role?            // If null, visible to all / Admin
+  link       String?
+  createdAt  DateTime         @default(now())
+
+  @@map("notifications")
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String?
+  userName  String   @default("System")
+  action    String   // e.g. "MATERIAL_ADDED", "ORDER_LOCKED", "QC_APPROVED", "DISPATCH_COMPLETED"
+  module    String   // e.g. "Inventory", "Production", "QC", "Dispatch", "Auth"
+  details   String?  // JSON string or readable summary
+  ipAddress String?
+  createdAt DateTime @default(now())
+
+  user      User?    @relation("UserAuditLogs", fields: [userId], references: [id])
+
+  @@map("audit_logs")
+}
