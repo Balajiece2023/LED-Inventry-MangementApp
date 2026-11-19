@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  # 1. PostgreSQL Database Service
+  postgres_db:
+    image: postgres:16-alpine
+    container_name: lumina_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: enterprise_password_2026
+      POSTGRES_DB: led_mfg_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - lumina_network
+
+  # 2. Node.js + Express Backend Service
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: lumina_backend
+    restart: always
+    environment:
+      PORT: 5001
+      DATABASE_URL: "postgresql://postgres:enterprise_password_2026@postgres_db:5432/led_mfg_db?schema=public"
+      JWT_SECRET: "led_mfg_super_secret_jwt_key_prod_2026"
+      JWT_EXPIRES_IN: "7d"
+      CORS_ORIGIN: "*"
+    depends_on:
+      - postgres_db
+    ports:
+      - "5001:5001"
+    networks:
+      - lumina_network
+
+  # 3. React Frontend + Nginx Proxy Service
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: lumina_frontend
+    restart: always
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - lumina_network
+
+volumes:
+  pgdata:
+    driver: local
+
+networks:
+  lumina_network:
+    driver: bridge
